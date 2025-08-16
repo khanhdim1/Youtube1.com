@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Freemium – Trùng Khánh</title>
+<style>
+body { font-family: Arial; margin:0; padding:0; background:#121212; color:#fff; }
+header { background:#ff0000; display:flex; align-items:center; padding:10px 20px; }
+header img { height:36px; margin-right:12px; }
+header h1 { margin:0; font-size:24px; }
+header span { font-size:12px; display:block; }
+
+.search-bar { display:flex; justify-content:center; margin:20px 0; flex-wrap:wrap; }
+.search-bar input { width:300px; padding:10px; border:none; border-radius:4px 0 0 4px; }
+.search-bar button { padding:10px 20px; border:none; background:#ff0000; color:white; cursor:pointer; border-radius:0 4px 4px 0; }
+
+#mainVideoWrapper { width:100%; position:relative; padding-top:56.25%; background:#000; margin-bottom:20px; }
+#mainVideo { position:absolute; top:0; left:0; width:100%; height:100%; }
+
+#videoTitle { margin-top:10px; font-size:20px; text-align:center; }
+.video-list { display:flex; flex-wrap:wrap; justify-content:center; gap:20px; padding:20px; }
+.video-item { width:100%; max-width:300px; background:#222; padding:10px; border-radius:8px; cursor:pointer; transition:0.2s; }
+.video-item:hover { transform:scale(1.03); }
+.video-item img { width:100%; border-radius:6px; margin-bottom:5px; }
+.video-item h3 { font-size:16px; margin:5px 0; color:#fff; }
+.music-control, .premium-btn { position:fixed; right:20px; background:#ff0000; border:none; padding:10px 15px; border-radius:50px; color:#fff; cursor:pointer; font-weight:bold; z-index:999; margin-bottom:10px; }
+.premium-btn { bottom:70px; }
+.music-control { bottom:20px; }
+.video-item button { margin-right:5px; background:#ff0000; border:none; color:#fff; padding:5px 10px; border-radius:5px; cursor:pointer; }
+.toast { position: fixed; bottom: 90px; right: 20px; background: rgba(255,0,0,0.9); padding: 10px 20px; border-radius: 8px; color: #fff; font-weight: bold; opacity:0; pointer-events:none; transition: opacity 0.5s ease; z-index:1000; }
+#nextCountdown { position:absolute; top:10px; right:10px; background:rgba(0,0,0,0.7); padding:5px 10px; border-radius:5px; font-size:14px; display:none; }
+
+@media(max-width:900px){ .video-list{flex-direction:column; align-items:center;} .video-item{width:90%;} }
+@media(max-width:600px){ #mainVideoWrapper { padding-top:56.25%; } }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex;align-items:center;">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/b/b8/YouTube_Logo_2017.svg" alt="Logo">
+    <div>
+      <h1>YouTube – của Trùng Khánh</h1>
+      <span>Gia Lai, Việt Nam</span>
+    </div>
+  </div>
+</header>
+
+<div class="search-bar">
+  <input type="text" id="searchQuery" placeholder="Nhập từ khóa tìm kiếm...">
+  <button onclick="searchVideos()">Tìm kiếm</button>
+</div>
+
+<div id="mainVideoWrapper">
+  <div id="mainVideo"></div>
+  <div id="nextCountdown"></div>
+</div>
+<div id="videoTitle"></div>
+<div class="video-list" id="videoList"></div>
+
+<audio id="backgroundMusic" loop></audio>
+<button class="premium-btn" onclick="togglePremium()">Bật/Tắt Premium</button>
+<button class="music-control" onclick="toggleMusic()">🔊 Nhạc nền</button>
+<div id="toast" class="toast"></div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+let player;
+let userHasPremium=false;
+let currentTitle = '';
+let nextPageToken = '';
+let currentQuery = '';
+const music=document.getElementById('backgroundMusic');
+const toastEl = document.getElementById('toast');
+const countdownEl = document.getElementById('nextCountdown');
+
+const playlist = [
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3'
+];
+let currentTrack = 0;
+let relatedVideos = [];
+let countdownTimer = null;
+
+function showToast(message){
+  toastEl.innerText = message;
+  toastEl.style.opacity = '1';
+  setTimeout(()=>{ toastEl.style.opacity = '0'; },2000);
+}
+
+function onYouTubeIframeAPIReady(){ 
+  player = new YT.Player('mainVideo', { height:'100%', width:'100%', videoId:'', playerVars:{autoplay:0, controls:1, modestbranding:1, rel:0} }); 
+}
+
+function loadVideo(videoId, title){
+  player.loadVideoById(videoId);
+  currentTitle = title;
+  document.getElementById('videoTitle').innerText = title;
+  loadRelatedVideos(videoId);
+}
+
+async function loadRelatedVideos(videoId){
+  try{
+    const response = await fetch(`https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&relatedToVideoId=${videoId}&maxResults=12&key=${API_KEY}`);
+    const data = await response.json();
+    relatedVideos = data.items.filter(v => v.id && v.id.videoId);
+    appendVideos(relatedVideos, true);
+  } catch(err){
+    console.error(err);
+    showToast("Không lấy được video đề xuất.");
+  }
+}
+
+function appendVideos(videos, replace=false){
+  const videoList = document.getElementById('videoList');
+  if(replace) videoList.innerHTML = '';
+  videos.forEach(video=>{
+    const div = document.createElement('div');
+    div.className = 'video-item';
+    const thumb = video.snippet.thumbnails.medium.url;
+    div.innerHTML=`
+      <img src="${thumb}" alt="${video.snippet.title}">
+      <h3>${video.snippet.title}</h3>
+      <button onclick="event.stopPropagation(); likeVideo('${video.id.videoId}')">👍 Like</button>
+      <button onclick="event.stopPropagation(); shareVideo('${video.id.videoId}')">🔗 Share</button>`;
+    div.onclick = ()=>{
+      loadVideo(video.id.videoId, video.snippet.title);
+      startNextCountdown();
+    }
+    videoList.appendChild(div);
+  });
+}
+
+// Nhạc nền
+music.addEventListener('ended', ()=>{
+  if(!userHasPremium) return;
+  currentTrack = (currentTrack + 1) % playlist.length;
+  music.src = playlist[currentTrack];
+  music.play().catch(()=>{});
+});
+
+function toggleMusic(){
+  if(!userHasPremium){ 
+    music.pause(); 
+    showToast("Bật Premium để nghe nhạc nền!"); 
+    return; 
+  }
+  if(music.paused){
+    music.src = playlist[currentTrack];
+    music.play().catch(()=>{});
+    showToast("Nhạc nền đang phát");
+  } else {
+    music.pause();
+    showToast("Nhạc nền tạm dừng");
+  }
+}
+
+function togglePremium(){ 
+  userHasPremium = !userHasPremium;
+  localStorage.setItem('userHasPremium', userHasPremium);
+  showToast(userHasPremium ? "Premium ON" : "Premium OFF");
+  if(userHasPremium && music.paused){
+    music.src = playlist[currentTrack];
+    music.play().catch(()=>{});
+  } else if(!userHasPremium){
+    music.pause();
+  }
+}
+
+function likeVideo(videoId){ showToast("Đã Like video!"); }
+function shareVideo(videoId){ 
+  navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${videoId}`);
+  showToast("Link đã copy: https://www.youtube.com/watch?v="+videoId); 
+}
+
+const API_KEY='AIzaSyC6yjzmXf_CqU6uTmi0sSHjzvub08fFzuo';
+async function searchVideos(pageToken=''){
+  const query = document.getElementById('searchQuery').value;
+  if(!query) return showToast('Nhập từ khóa!');
+  currentQuery = query;
+
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&q=${encodeURIComponent(query)}&maxResults=12&key=${API_KEY}&pageToken=${pageToken}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    nextPageToken = data.nextPageToken || '';
+    let videos = data.items.filter(v => v.id && v.id.videoId);
+
+    if(videos.length === 0){
+      showToast('Không tìm thấy video. Hiển thị demo.');
+      videos = [
+        {id:{videoId:'dQw4w9WgXcQ'}, snippet:{title:'Video Demo 1', thumbnails:{medium:{url:'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg'}}}},
+        {id:{videoId:'3JZ_D3ELwOQ'}, snippet:{title:'Video Demo 2', thumbnails:{medium:{url:'https://img.youtube.com/vi/3JZ_D3ELwOQ/mqdefault.jpg'}}}}
+      ];
+    }
+
+    if(!pageToken) loadVideo(videos[0].id.videoId, videos[0].snippet.title);
+    appendVideos(videos);
+  } catch(err){
+    console.error(err);
+    showToast('Lỗi tìm kiếm video. Hiển thị demo.');
+  }
+}
+
+// Infinite scroll
+window.addEventListener('scroll', ()=>{
+  const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+  const scrolled = window.scrollY;
+  if(scrolled / scrollable > 0.8 && nextPageToken){
+    searchVideos(nextPageToken);
+    nextPageToken = '';
+  }
+});
+
+// Lưu trạng thái video + nhạc
+setInterval(()=>{
+  if(player && player.getPlayerState){
+    localStorage.setItem('videoId', player.getVideoData().video_id);
+    localStorage.setItem('videoTime', player.getCurrentTime());
+    localStorage.setItem('videoState', player.getPlayerState());
+  }
+  if(userHasPremium){
+    localStorage.setItem('musicPlaying', !music.paused);
+    localStorage.setItem('musicCurrentTime', music.currentTime);
+    localStorage.setItem('musicTrack', currentTrack);
+  }
+},1000);
+
+// Resume video + nhạc khi load trang
+window.addEventListener('load', ()=>{
+  userHasPremium = localStorage.getItem('userHasPremium') === 'true';
+  
+  currentTrack = parseInt(localStorage.getItem('musicTrack')) || 0;
+  music.src = playlist[currentTrack];
+  music.currentTime = parseFloat(localStorage.getItem('musicCurrentTime')) || 0;
+  const shouldPlayMusic = localStorage.getItem('musicPlaying') === 'true';
+  if(userHasPremium && shouldPlayMusic){
+    const playMusic = () => { music.play().catch(()=>{}); }
+    window.addEventListener('click', playMusic);
+    window.addEventListener('touchstart', playMusic);
+  }
+
+  const savedVideoId = localStorage.getItem('videoId');
+  const savedTime = parseFloat(localStorage.getItem('videoTime')) || 0;
+  const savedState = parseInt(localStorage.getItem('videoState')) || 2;
+  if(savedVideoId){
+    player.loadVideoById(savedVideoId, savedTime);
+    if(savedState === 1) player.playVideo();
+  }
+});
+
+// Next video countdown
+function startNextCountdown(){
+  if(!relatedVideos || relatedVideos.length===0) return;
+  let countdown = 5;
+  countdownEl.style.display = 'block';
+  countdownEl.innerText = `Chuyển video tiếp theo trong ${countdown}s`;
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(()=>{
+    countdown--;
+    countdownEl.innerText = `Chuyển video tiếp theo trong ${countdown}s`;
+    if(countdown<=0){
+      clearInterval(countdownTimer);
+      countdownEl.style.display = 'none';
+      const nextVideo = relatedVideos[0];
+      if(nextVideo) loadVideo(nextVideo.id.videoId, nextVideo.snippet.title);
+      relatedVideos.shift();
+      startNextCountdown();
+    }
+  },1000);
+}
+</script>
+</body>
+</html>
